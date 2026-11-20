@@ -455,6 +455,8 @@
     "test": "测试",
     "chatUrl": "Chat URL",
     "urlAutoDetectHint": "测试时会自动探测正确的 API 端点，URL 可能被自动补全",
+    "codexCompatibility": "Codex Responses 兼容模式",
+    "codexCompatibilityHint": "适用于要求 Codex 兼容标识且仅接受流式 Responses 的中转服务。",
     "urlAutoCompleted": "URL 已自动补全为 {{url}}",
     "register": "注册",
     "registerGuide": "注册指引",

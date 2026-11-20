@@ -87,13 +87,17 @@ func (p Provider) probeResponse(ctx context.Context, candidate, model string) (s
 	}
 	var response *http.Response
 	opts = append(opts, option.WithHeader("Accept", "text/event-stream"), option.WithResponseInto(&response))
-	stream := p.client.NewStreaming(ctx, responses.ResponseNewParams{
+	params := responses.ResponseNewParams{
 		Model:           model,
 		Input:           responses.ResponseNewParamsInputUnion{OfString: param.NewOpt("hi")},
 		MaxOutputTokens: param.NewOpt(int64(64)),
 		Store:           param.NewOpt(false),
 		Background:      param.NewOpt(false),
-	}, opts...)
+	}
+	if p.ProviderType == ProviderTypeCodex {
+		params.Background = param.Opt[bool]{}
+	}
+	stream := p.client.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
 	if err := stream.Err(); err != nil {
 		converted := convertSDKError(err, response)

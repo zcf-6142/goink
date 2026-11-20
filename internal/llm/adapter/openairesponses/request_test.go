@@ -159,12 +159,14 @@ func TestRequestOptionsRespectExactModelCapabilities(t *testing.T) {
 
 func TestRequestOutputLimitsAndTemperature(t *testing.T) {
 	for _, tt := range []struct {
-		name, model string
-		limit       int
-		temperature *float64
-		options     *adapter.CallOptions
-		wantMax     int64
-		wantError   bool
+		name, model     string
+		providerType    string
+		limit           int
+		temperature     *float64
+		options         *adapter.CallOptions
+		wantMax         int64
+		wantTemperature *float64
+		wantError       bool
 	}{
 		{name: "known default", model: "gpt-6-sol", wantMax: 128_000},
 		{name: "unknown default", model: "relay-alias", wantMax: 4096},
@@ -174,9 +176,14 @@ func TestRequestOutputLimitsAndTemperature(t *testing.T) {
 		{name: "negative output", model: "gpt-6-sol", options: &adapter.CallOptions{MaxTokens: pointer(-1)}, wantError: true},
 		{name: "exceeds configured limit", model: "gpt-6-sol", limit: 1024, options: &adapter.CallOptions{MaxTokens: pointer(1025)}, wantError: true},
 		{name: "sampling with thinking", model: "gpt-6-sol", temperature: pointer(1.0), wantError: true},
-		{name: "sampling with none", model: "gpt-6-sol", temperature: pointer(0.5), options: &adapter.CallOptions{ThinkingEnabled: pointer(false)}, wantMax: 128_000},
-		{name: "unknown sampling", model: "relay-alias", temperature: pointer(0.0), wantMax: 4096},
-		{name: "temperature call override", model: "relay-alias", temperature: pointer(5.0), options: &adapter.CallOptions{Temperature: pointer(0.2)}, wantMax: 4096},
+		{name: "Sol 6.1 provider sampling with default thinking", model: "gpt-6.1-sol", providerType: ProviderTypeCodex, temperature: pointer(0.7), wantMax: 128_000},
+		{name: "Sol 6.1 call sampling with high thinking", model: "gpt-6.1-sol", providerType: ProviderTypeCodex, options: &adapter.CallOptions{Temperature: pointer(0.7), ReasoningEffort: pointer("high")}, wantMax: 128_000},
+		{name: "Codex sampling with none", model: "gpt-6-sol", providerType: ProviderTypeCodex, temperature: pointer(0.5), options: &adapter.CallOptions{ThinkingEnabled: pointer(false)}, wantMax: 128_000, wantTemperature: pointer(0.5)},
+		{name: "Codex invalid sampling", model: "gpt-6.1-sol", providerType: ProviderTypeCodex, temperature: pointer(math.NaN()), wantError: true},
+		{name: "Codex invalid choice after omitted sampling", model: "gpt-6.1-sol", providerType: ProviderTypeCodex, temperature: pointer(0.7), options: &adapter.CallOptions{ToolChoice: "unsupported"}, wantError: true},
+		{name: "sampling with none", model: "gpt-6-sol", temperature: pointer(0.5), options: &adapter.CallOptions{ThinkingEnabled: pointer(false)}, wantMax: 128_000, wantTemperature: pointer(0.5)},
+		{name: "unknown sampling", model: "relay-alias", temperature: pointer(0.0), wantMax: 4096, wantTemperature: pointer(0.0)},
+		{name: "temperature call override", model: "relay-alias", temperature: pointer(5.0), options: &adapter.CallOptions{Temperature: pointer(0.2)}, wantMax: 4096, wantTemperature: pointer(0.2)},
 		{name: "nan", model: "relay-alias", temperature: pointer(math.NaN()), wantError: true},
 		{name: "infinity", model: "relay-alias", temperature: pointer(math.Inf(1)), wantError: true},
 		{name: "negative temperature", model: "relay-alias", temperature: pointer(-0.1), wantError: true},
@@ -184,6 +191,9 @@ func TestRequestOutputLimitsAndTemperature(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			p := requestProvider(t)
+			if tt.providerType != "" {
+				p.ProviderType = tt.providerType
+			}
 			p.Models, p.Temperature = []adapter.ModelInfo{{ID: tt.model, MaxOutputTokens: tt.limit}}, tt.temperature
 			req := requestInput()
 			req.Model, req.Options = tt.model, tt.options
@@ -193,6 +203,29 @@ func TestRequestOutputLimitsAndTemperature(t *testing.T) {
 			}
 			if err == nil && params.MaxOutputTokens.Value != tt.wantMax {
 				t.Fatalf("max_output_tokens=%d, want %d", params.MaxOutputTokens.Value, tt.wantMax)
+			}
+			if err != nil {
+				return
+			}
+			if tt.model == "gpt-6.1-sol" && tt.providerType == ProviderTypeCodex {
+				wantEffort := "medium"
+				if tt.options != nil && tt.options.ReasoningEffort != nil {
+					wantEffort = *tt.options.ReasoningEffort
+				}
+				if string(params.Reasoning.Effort) != wantEffort {
+					t.Fatalf("reasoning effort=%q, want %q", params.Reasoning.Effort, wantEffort)
+				}
+			}
+			raw, present := encodeParams(t, params)["temperature"]
+			if tt.wantTemperature == nil {
+				if present {
+					t.Fatalf("unexpected temperature in request: %s", raw)
+				}
+			} else {
+				var actual float64
+				if !present || json.Unmarshal(raw, &actual) != nil || actual != *tt.wantTemperature {
+					t.Fatalf("temperature=%s, want %v", raw, *tt.wantTemperature)
+				}
 			}
 		})
 	}

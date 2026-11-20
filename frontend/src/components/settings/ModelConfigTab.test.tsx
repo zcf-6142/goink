@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import {
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -248,6 +249,204 @@ it("creates same-named instances under four protocols and preserves their select
   expect(screen.getByRole("textbox", { name: "settings.chatUrl" })).toHaveValue(
     "https://relay.test/openai_chat",
   );
+  expect(api.TestConnection).not.toHaveBeenCalled();
+});
+
+it("creates a Codex-compatible Responses instance and preserves the mode after reloading", async () => {
+  stored.providers.forEach((provider) => {
+    provider.api_key = "";
+  });
+  api.SaveLLMConfig.mockImplementation((input: llm.LLMConfigView) => {
+    stored = new llm.LLMConfigView(input);
+    return Promise.resolve();
+  });
+  const user = setup();
+  await screen.findByRole("button", { name: "Chat" });
+  await user.click(
+    screen.getByRole("button", { name: "settings.customProviders" }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "settings.addCustomProvider" }),
+  );
+  const form = within(
+    screen.getByRole("group", { name: "settings.newCustomProvider" }),
+  );
+  expect(
+    form.queryByRole("checkbox", { name: "settings.codexCompatibility" }),
+  ).not.toBeInTheDocument();
+  await user.click(form.getByRole("button", { name: "settings.protocol" }));
+  await user.click(form.getByRole("option", { name: "OpenAI Responses" }));
+  const compatibility = form.getByRole("checkbox", {
+    name: "settings.codexCompatibility",
+  });
+  expect(compatibility).not.toBeChecked();
+  await user.click(compatibility);
+  fireEvent.change(form.getByRole("textbox", { name: "common.name" }), {
+    target: { value: "Responses relay" },
+  });
+  fireEvent.change(form.getByRole("textbox", { name: "settings.chatUrl" }), {
+    target: { value: "https://relay.test/v1/responses" },
+  });
+  await user.click(form.getByRole("button", { name: "settings.add" }));
+  expect(
+    screen.getByRole("checkbox", { name: "settings.codexCompatibility" }),
+  ).toBeChecked();
+  await user.click(screen.getByRole("button", { name: "settings.saveConfig" }));
+  await waitFor(() => expect(api.GetLLMConfig).toHaveBeenCalledTimes(2));
+  const saved: llm.LLMConfigView = api.SaveLLMConfig.mock.calls[0][0];
+  expect(
+    saved.providers.find((provider) => provider.source === "custom"),
+  ).toMatchObject({
+    key: "openai_responses/Responses%20relay",
+    adapter_name: "openai_responses",
+    provider_type: "openai-codex",
+    name: "Responses relay",
+    chat_url: "https://relay.test/v1/responses",
+    api_key: "",
+  });
+  expect(api.TestConnection).not.toHaveBeenCalled();
+
+  cleanup();
+  const reloadedUser = setup();
+  await screen.findByRole("button", { name: "Chat" });
+  await reloadedUser.click(
+    screen.getByRole("button", { name: "settings.customProviders" }),
+  );
+  await screen.findByText("Responses relay");
+  expect(
+    screen.getByRole("checkbox", { name: "settings.codexCompatibility" }),
+  ).toBeChecked();
+  expect(screen.getByRole("textbox", { name: "settings.chatUrl" })).toHaveValue(
+    "https://relay.test/v1/responses",
+  );
+});
+
+it.each([
+  ["openai", "openai-codex"],
+  ["openai-codex", "openai"],
+])(
+  "retests an existing Responses instance when changing mode from %s to %s without changing its key or URL",
+  async (initialType, nextType) => {
+    const provider = new llm.ProviderView({
+      ...stored.providers[2],
+      key: "openai_responses/Responses%20relay",
+      name: "Responses relay",
+      source: "custom",
+      provider_type: initialType,
+      builtin_models: [],
+      custom_models: stored.providers[2].builtin_models,
+    });
+    stored.providers.push(provider);
+    api.TestConnection.mockImplementation((input: llm.TestConnectionInput) =>
+      Promise.resolve(
+        new adapter.TestConnectionResult({ URL: input.chat_url }),
+      ),
+    );
+    const user = setup();
+    await screen.findByRole("button", { name: "Chat" });
+    await user.click(
+      screen.getByRole("button", { name: "settings.customProviders" }),
+    );
+    const compatibility = screen.getByRole("checkbox", {
+      name: "settings.codexCompatibility",
+    });
+    expect(compatibility).toHaveProperty(
+      "checked",
+      initialType === "openai-codex",
+    );
+    await user.click(compatibility);
+    expect(
+      screen.getByRole("textbox", { name: "settings.chatUrl" }),
+    ).toHaveValue(provider.chat_url);
+    expect(screen.getByLabelText("settings.apiKey")).toHaveValue(
+      provider.api_key,
+    );
+    expect(api.TestConnection).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "settings.saveConfig" }),
+    );
+    await waitFor(() => expect(api.SaveLLMConfig).toHaveBeenCalledTimes(1));
+    expect(api.TestConnection).toHaveBeenCalledExactlyOnceWith({
+      adapter_name: "openai_responses",
+      provider_name: provider.name,
+      provider_type: nextType,
+      chat_url: provider.chat_url,
+      api_key: provider.api_key,
+      model_id: "model",
+    });
+    const saved: llm.LLMConfigView = api.SaveLLMConfig.mock.calls[0][0];
+    expect(saved.providers.slice(0, 4)).toEqual(stored.providers.slice(0, 4));
+    expect(saved.providers[4]).toMatchObject({
+      key: provider.key,
+      adapter_name: provider.adapter_name,
+      provider_type: nextType,
+      name: provider.name,
+      chat_url: provider.chat_url,
+      api_key: provider.api_key,
+    });
+  },
+);
+
+it("hides and clears Responses compatibility when creating instances under other protocols", async () => {
+  stored.providers.forEach((provider) => {
+    provider.api_key = "";
+  });
+  const user = setup();
+  await screen.findByRole("button", { name: "Chat" });
+  expect(
+    screen.queryByRole("checkbox", { name: "settings.codexCompatibility" }),
+  ).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "settings.customProviders" }),
+  );
+  const choices = [
+    ["openai_chat", "OpenAI Chat", "openai"],
+    ["anthropic_messages", "Anthropic Messages", "anthropic"],
+    ["gemini_interactions", "Gemini Interactions", "google"],
+  ];
+  for (const [protocol, label] of choices) {
+    await user.click(
+      screen.getByRole("button", { name: "settings.addCustomProvider" }),
+    );
+    const form = within(
+      screen.getByRole("group", { name: "settings.newCustomProvider" }),
+    );
+    await user.click(form.getByRole("button", { name: "settings.protocol" }));
+    await user.click(form.getByRole("option", { name: "OpenAI Responses" }));
+    await user.click(
+      form.getByRole("checkbox", { name: "settings.codexCompatibility" }),
+    );
+    await user.click(form.getByRole("button", { name: "settings.protocol" }));
+    await user.click(form.getByRole("option", { name: label }));
+    expect(
+      form.queryByRole("checkbox", { name: "settings.codexCompatibility" }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(form.getByRole("textbox", { name: "common.name" }), {
+      target: { value: `${label} relay` },
+    });
+    fireEvent.change(form.getByRole("textbox", { name: "settings.chatUrl" }), {
+      target: { value: `https://relay.test/${protocol}` },
+    });
+    await user.click(form.getByRole("button", { name: "settings.add" }));
+    expect(
+      screen.queryByRole("checkbox", { name: "settings.codexCompatibility" }),
+    ).not.toBeInTheDocument();
+  }
+  await user.click(screen.getByRole("button", { name: "settings.saveConfig" }));
+  await waitFor(() => expect(api.SaveLLMConfig).toHaveBeenCalledTimes(1));
+  const saved: llm.LLMConfigView = api.SaveLLMConfig.mock.calls[0][0];
+  const custom = saved.providers.filter(
+    (provider) => provider.source === "custom",
+  );
+  expect(custom).toHaveLength(3);
+  for (const [index, [protocol, label, providerType]] of choices.entries()) {
+    expect(custom[index]).toMatchObject({
+      adapter_name: protocol,
+      provider_type: providerType,
+      name: `${label} relay`,
+      chat_url: `https://relay.test/${protocol}`,
+    });
+  }
   expect(api.TestConnection).not.toHaveBeenCalled();
 });
 

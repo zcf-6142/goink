@@ -21,6 +21,9 @@ func (p Provider) buildRequest(req adapter.Request) (responses.ResponseNewParams
 		Background: param.NewOpt(false),
 		Include:    []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent},
 	}
+	if p.ProviderType == ProviderTypeCodex {
+		params.Background = param.Opt[bool]{}
+	}
 	if strings.TrimSpace(req.Model) == "" {
 		return params, fmt.Errorf("OpenAI Responses model must not be empty")
 	}
@@ -136,9 +139,12 @@ func (p Provider) applyOptions(params *responses.ResponseNewParams, policy, conf
 		// 推理开启时不支持采样参数；未知型号交给服务端校验，不根据名称前缀猜能力。
 		// https://developers.openai.com/api/docs/guides/latest-model
 		if effort != "" && effort != "none" {
-			return fmt.Errorf("model %q does not support temperature at reasoning effort %q", params.Model, effort)
+			if p.ProviderType != ProviderTypeCodex {
+				return fmt.Errorf("model %q does not support temperature at reasoning effort %q", params.Model, effort)
+			}
+		} else {
+			params.Temperature = param.NewOpt(value)
 		}
-		params.Temperature = param.NewOpt(value)
 	}
 	if opts != nil && opts.ToolChoice != nil {
 		choice, err := buildToolChoice(opts.ToolChoice, params.Tools)

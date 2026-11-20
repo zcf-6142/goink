@@ -20,6 +20,9 @@ func (c *Adapter) Generate(ctx context.Context, req adapter.Request) (adapter.Re
 	if err != nil {
 		return adapter.Response{}, err
 	}
+	if p.ProviderType == ProviderTypeCodex {
+		return p.streamResponse(ctx, params, func(adapter.StreamEvent) bool { return true })
+	}
 	opts, err := responsesURLOptions(p.ChatURL)
 	if err != nil {
 		return adapter.Response{}, err

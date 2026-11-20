@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 
 	"github.com/sigpanic/goink/internal/llm/adapter"
 )
@@ -27,46 +28,7 @@ func (c *Adapter) Stream(ctx context.Context, req adapter.Request) <-chan adapte
 			fail(err)
 			return
 		}
-		opts, err := responsesURLOptions(p.ChatURL)
-		if err != nil {
-			fail(err)
-			return
-		}
-		var response *http.Response
-		opts = append(opts, option.WithHeader("Accept", "text/event-stream"), option.WithResponseInto(&response))
-		stream := p.client.NewStreaming(ctx, params, opts...)
-		defer stream.Close()
-		if err := stream.Err(); err != nil {
-			fail(convertSDKError(err, response))
-			return
-		}
-		if response == nil {
-			fail(invalidResponse("missing SSE HTTP response"))
-			return
-		}
-		mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-		if err != nil || mediaType != "text/event-stream" {
-			fail(invalidResponse("expected text/event-stream response"))
-			return
-		}
-		var state streamState
-		for stream.Next() {
-			if err := state.consume(stream.Current(), emit); err != nil {
-				fail(err)
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-		}
-		if err := stream.Err(); err != nil {
-			fail(convertSDKError(err, response))
-			return
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		result, err := state.finish(p, params)
+		result, err := p.streamResponse(ctx, params, emit)
 		if err != nil {
 			fail(err)
 			return
@@ -82,4 +44,41 @@ func (c *Adapter) Stream(ctx context.Context, req adapter.Request) <-chan adapte
 		}
 	}()
 	return ch
+}
+
+func (p Provider) streamResponse(ctx context.Context, params responses.ResponseNewParams, emit func(adapter.StreamEvent) bool) (adapter.Response, error) {
+	opts, err := responsesURLOptions(p.ChatURL)
+	if err != nil {
+		return adapter.Response{}, err
+	}
+	var response *http.Response
+	opts = append(opts, option.WithHeader("Accept", "text/event-stream"), option.WithResponseInto(&response))
+	stream := p.client.NewStreaming(ctx, params, opts...)
+	defer stream.Close()
+	if err := stream.Err(); err != nil {
+		return adapter.Response{}, convertSDKError(err, response)
+	}
+	if response == nil {
+		return adapter.Response{}, invalidResponse("missing SSE HTTP response")
+	}
+	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || mediaType != "text/event-stream" {
+		return adapter.Response{}, invalidResponse("expected text/event-stream response")
+	}
+	var state streamState
+	for stream.Next() {
+		if err := state.consume(stream.Current(), emit); err != nil {
+			return adapter.Response{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return adapter.Response{}, err
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return adapter.Response{}, convertSDKError(err, response)
+	}
+	if err := ctx.Err(); err != nil {
+		return adapter.Response{}, err
+	}
+	return state.finish(p, params)
 }

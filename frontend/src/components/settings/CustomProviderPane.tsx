@@ -86,6 +86,7 @@ export default function CustomProviderPane({
   };
   const [newName, setNewName] = useState("");
   const [newAdapterName, setNewAdapterName] = useState("openai_chat");
+  const [newCodexCompatibility, setNewCodexCompatibility] = useState(false);
   const [nameConflict, setNameConflict] = useState(false);
   const [newChatURL, setNewChatURL] = useState("");
   const [newApiKey, setNewApiKey] = useState("");
@@ -114,7 +115,11 @@ export default function CustomProviderPane({
       new llm.ProviderView({
         key,
         adapter_name: newProtocol.adapterName,
-        provider_type: newProtocol.providerType,
+        provider_type:
+          newProtocol.adapterName === "openai_responses" &&
+          newCodexCompatibility
+            ? "openai-codex"
+            : newProtocol.providerType,
         name,
         chat_url: newChatURL.trim(),
         api_key: newApiKey,
@@ -127,6 +132,7 @@ export default function CustomProviderPane({
     );
     setNewName("");
     setNewAdapterName("openai_chat");
+    setNewCodexCompatibility(false);
     setNameConflict(false);
     setNewChatURL("");
     setNewApiKey("");
@@ -212,6 +218,7 @@ export default function CustomProviderPane({
               }))}
               onChange={(value) => {
                 setNewAdapterName(value);
+                setNewCodexCompatibility(false);
                 setNameConflict(false);
               }}
               className="flex-1 min-w-0"
@@ -219,6 +226,17 @@ export default function CustomProviderPane({
               dropUp={false}
             />
           </div>
+
+          {newAdapterName === "openai_responses" && (
+            <label className="flex items-center gap-2 text-xs pl-[4.75rem]">
+              <input
+                type="checkbox"
+                checked={newCodexCompatibility}
+                onChange={(e) => setNewCodexCompatibility(e.target.checked)}
+              />
+              {t("settings.codexCompatibility")}
+            </label>
+          )}
 
           <div className="flex items-center gap-3">
             <label className="text-xs text-muted-foreground w-16 shrink-0">
@@ -298,6 +316,29 @@ export default function CustomProviderPane({
               {protocolLabel(provider.adapter_name)}
             </span>
           </div>
+
+          {provider.adapter_name === "openai_responses" && (
+            <div className="pl-[5rem] space-y-1">
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={provider.provider_type === "openai-codex"}
+                  disabled={testing[selectedKey]}
+                  onChange={(e) =>
+                    onUpdate(selectedKey, {
+                      provider_type: e.target.checked
+                        ? "openai-codex"
+                        : "openai",
+                    })
+                  }
+                />
+                {t("settings.codexCompatibility")}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.codexCompatibilityHint")}
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <label className="text-xs text-muted-foreground w-16 shrink-0">

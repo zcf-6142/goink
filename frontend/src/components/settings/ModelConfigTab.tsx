@@ -121,12 +121,17 @@ export default function ModelConfigTab() {
       );
       // api_key 或 chat_url 改动都会使旧的 testResults 失效（dirty 校验：
       // 未测/key变/url变 都要在下次保存时重测，否则会保存未验证的新 URL）
-      if ("api_key" in patch || "chat_url" in patch) {
+      if (
+        "api_key" in patch ||
+        "chat_url" in patch ||
+        "provider_type" in patch
+      ) {
         setTestResults((prev) => {
           // 优化：仅 api_key 改动且值未变（onChange 触发但实际内容相同），跳过
           if (
             "api_key" in patch &&
             !("chat_url" in patch) &&
+            !("provider_type" in patch) &&
             prev[key]?.keySnapshot === patch.api_key
           ) {
             return prev;

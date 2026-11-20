@@ -12,6 +12,8 @@ import (
 	"github.com/sigpanic/goink/internal/llm/adapter"
 )
 
+const ProviderTypeCodex = "openai-codex"
+
 // Provider 组合公共配置和私有 SDK service；实例名索引配置，类型选择协议内行为。
 type Provider struct {
 	adapter.Provider
@@ -30,21 +32,25 @@ func assembleProvider(config adapter.Provider, client *http.Client) (Provider, e
 		return Provider{}, fmt.Errorf("provider %q: %w", config.Name, err)
 	}
 	origin := (&url.URL{Scheme: endpoint.Scheme, Host: endpoint.Host, Path: "/"}).String()
+	opts := []option.RequestOption{
+		option.WithBaseURL(origin),
+		option.WithAPIKey(config.APIKey),
+		option.WithHTTPClient(client),
+		option.WithMaxRetries(0),
+	}
+	if config.ProviderType == ProviderTypeCodex {
+		opts = append(opts, option.WithHeader("User-Agent", "Goink (Codex Responses compatible)"))
+	}
 	return Provider{
 		Provider: config.Clone(),
 		// service 构造器不读取环境默认值；只使用当前实例和根包注入的 HTTP client。
-		client: responses.NewResponseService(
-			option.WithBaseURL(origin),
-			option.WithAPIKey(config.APIKey),
-			option.WithHTTPClient(client),
-			option.WithMaxRetries(0),
-		),
+		client: responses.NewResponseService(opts...),
 	}, nil
 }
 
 // ValidateProviderType 不依赖实例名称，官方及兼容中转均使用 openai 行为类型。
 func ValidateProviderType(providerType string) error {
-	if providerType != "openai" {
+	if providerType != "openai" && providerType != ProviderTypeCodex {
 		return fmt.Errorf("unknown OpenAI Responses provider type %q", providerType)
 	}
 	return nil

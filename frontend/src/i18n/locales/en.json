@@ -465,6 +465,8 @@
     "test": "Test",
     "chatUrl": "Chat URL",
     "urlAutoDetectHint": "The correct endpoint is auto-detected during testing; the URL may be auto-completed.",
+    "codexCompatibility": "Codex Responses compatibility",
+    "codexCompatibilityHint": "For relays that require a Codex-compatible client identifier and streaming Responses requests.",
     "urlAutoCompleted": "URL auto-completed to {{url}}",
     "register": "Register",
     "registerGuide": "Register Guide",
